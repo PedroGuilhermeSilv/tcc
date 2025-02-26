@@ -1,0 +1,34 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Instalar dependências do sistema e AliceVision
+RUN apt-get update && apt-get install -y \
+    libgl1-mesa-glx \
+    libglib2.0-0 \
+    wget \
+    unzip \
+    cmake \
+    build-essential \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Baixar e instalar AliceVision (versão mais recente)
+RUN mkdir -p /opt/AliceVision && \
+    git clone https://github.com/alicevision/AliceVision.git --recursive && \
+    mkdir build && cd build && \
+    cmake -DALICEVISION_BUILD_DEPENDENCIES=ON -DCMAKE_INSTALL_PREFIX=$PWD/../install ../AliceVision && \
+    make -j10
+# Adicionar AliceVision ao PATH
+ENV PATH="/opt/AliceVision/bin:${PATH}"
+ENV ALICEVISION_BIN_PATH="/opt/AliceVision/bin"
+
+# Copiar arquivos de requisitos e instalar dependências Python
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copiar o código-fonte
+COPY . .
+
+# Comando para iniciar o worker Celery
+CMD ["celery", "-A", "celery_app", "worker", "--loglevel=info"] 

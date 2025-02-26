@@ -1,0 +1,21 @@
+{
+    "[python]": {
+        "editor.defaultFormatter": "ms-python.black-formatter",
+        "editor.formatOnSave": true
+    },
+    "editor.codeActionsOnSave": {
+        "source.organizeImports": "explicit",
+        "source.fixAll": "explicit"
+    },
+    "python.testing.pytestArgs": [
+        "src",
+    ],
+    "python.analysis.extraPaths": [
+        "./src"
+    ],
+    "editor.tabSize": 4,
+    "python.testing.unittestEnabled": false,
+    "python.testing.pytestEnabled": true,
+    "cSpell.enabled": false,
+    "python.analysis.typeCheckingMode": "basic"
+}
