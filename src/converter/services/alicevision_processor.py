@@ -1,49 +1,53 @@
 import os
 import subprocess
 import requests
+import json
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import List, Optional, Union
+from pathlib import Path
 
 
 @dataclass
 class AliceVisionProcessor:
-    input_directory: str
-    output_directory: str
-    alicevision_bin_path: str = os.environ.get(
+    input_directory: Union[str, Path]
+    output_directory: Union[str, Path]
+    alicevision_bin_path: Union[str, Path] = os.environ.get(
         "ALICEVISION_BIN_PATH",
-        "/home/pedro/dev/tcc/src/Meshroom-2023.3.0/aliceVision/bin",
+        "/home/pedro/dev/tcc/tcc/src/Meshroom-2023.3.0/aliceVision/bin",
     )
     force_cpu: bool = False
     verbose: bool = True
 
     def __post_init__(self):
-        # Converte caminhos relativos para absolutos
-        self.input_directory = os.path.abspath(self.input_directory)
-        self.output_directory = os.path.abspath(self.output_directory)
-        self.alicevision_bin_path = os.path.abspath(self.alicevision_bin_path)
+        # Converte caminhos para Path caso sejam strings e garante o caminho absoluto
+        if isinstance(self.input_directory, str):
+            self.input_directory = Path(self.input_directory)
+        self.input_directory = self.input_directory.absolute()
+
+        if isinstance(self.output_directory, str):
+            self.output_directory = Path(self.output_directory)
+        self.output_directory = self.output_directory.absolute()
+
+        if isinstance(self.alicevision_bin_path, str):
+            self.alicevision_bin_path = Path(self.alicevision_bin_path)
+        self.alicevision_bin_path = self.alicevision_bin_path.absolute()
 
         # Verificar se o diretório dos binários existe
-        if not os.path.exists(self.alicevision_bin_path):
+        if not self.alicevision_bin_path.exists():
             raise ValueError(
                 f"O diretório de binários AliceVision não existe: {self.alicevision_bin_path}"
             )
 
-        # Configurar diretórios
-        self.alicevision_root = os.path.dirname(
-            os.path.dirname(self.alicevision_bin_path)
-        )
-        self.alicevision_lib_path = os.path.join(
-            os.path.dirname(self.alicevision_bin_path), "lib"
-        )
+        # Configurar diretórios usando Path
+        self.alicevision_root = self.alicevision_bin_path.parent.parent
+        self.alicevision_lib_path = self.alicevision_bin_path.parent / "lib"
 
-        # Configurar diretório share e arquivo OCIO
-        self.alicevision_share = os.path.join(
-            self.alicevision_root, "share/aliceVision"
-        )
-        os.makedirs(self.alicevision_share, exist_ok=True)
+        # Configurar diretório share e arquivo OCIO usando Path
+        self.alicevision_share = self.alicevision_root / "share" / "aliceVision"
+        self.alicevision_share.mkdir(parents=True, exist_ok=True)
 
-        self.ocio_path = os.path.join(self.alicevision_share, "config.ocio")
-        if not os.path.exists(self.ocio_path):
+        self.ocio_path = self.alicevision_share / "config.ocio"
+        if not self.ocio_path.exists():
             with open(self.ocio_path, "w") as f:
                 f.write(
                     """ocio_profile_version: 2
@@ -93,8 +97,8 @@ colorspaces:
         }
 
         for file_name, url in essential_files.items():
-            file_path = os.path.join(self.alicevision_share, file_name)
-            if not os.path.exists(file_path):
+            file_path = self.alicevision_share / file_name
+            if not file_path.exists():
                 print(f"Baixando arquivo essencial: {file_name}")
                 try:
                     response = requests.get(url, timeout=10)
@@ -109,8 +113,8 @@ colorspaces:
         """Processa imagens usando AliceVision para criar modelo 3D"""
         try:
             # Criar diretório de cache
-            cache_dir = os.path.join(self.output_directory, "cache")
-            os.makedirs(cache_dir, exist_ok=True)
+            cache_dir = self.output_directory / "cache"
+            cache_dir.mkdir(exist_ok=True)
 
             # Pipeline completo do AliceVision
             self._run_feature_extraction(cache_dir)
@@ -134,18 +138,18 @@ colorspaces:
 
     def _get_bin_path(self, binary_name: str) -> str:
         """Retorna o caminho completo para um binário do AliceVision"""
-        return os.path.join(self.alicevision_bin_path, binary_name)
+        return str(self.alicevision_bin_path / binary_name)
 
-    def _run_command(self, cmd: List[str]) -> None:
+    def _run_command(self, cmd: List[str], env: dict = None) -> None:
         """Executa um comando do AliceVision com o ambiente configurado"""
         print(f"Executando: {' '.join(cmd)}")
 
         # Configurar ambiente
-        env = os.environ.copy()
+        env = env or os.environ.copy()
 
         # Configurar caminho das bibliotecas
         lib_paths = [
-            self.alicevision_lib_path,
+            str(self.alicevision_lib_path),
             "/usr/lib",
             "/usr/local/lib",
             "/home/pedro/dev/tcc/src/Meshroom-2023.3.0/lib",
@@ -158,9 +162,9 @@ colorspaces:
         )
 
         # Configurar variáveis de ambiente do AliceVision
-        env["ALICEVISION_ROOT"] = self.alicevision_root
-        env["ALICEVISION_SHARE"] = self.alicevision_share
-        env["OCIO"] = self.ocio_path
+        env["ALICEVISION_ROOT"] = str(self.alicevision_root)
+        env["ALICEVISION_SHARE"] = str(self.alicevision_share)
+        env["OCIO"] = str(self.ocio_path)
 
         print(f"Com LD_LIBRARY_PATH: {env['LD_LIBRARY_PATH']}")
         print(f"Com ALICEVISION_ROOT: {env['ALICEVISION_ROOT']}")
@@ -169,13 +173,15 @@ colorspaces:
 
         try:
             result = subprocess.run(
-                cmd, check=True, env=env, capture_output=True, text=True
+                cmd,
+                env=env,
+                check=True,
+                capture_output=True,
+                text=True,
             )
-
-            if result.stdout and self.verbose:
+            if result.stdout:
                 print("Saída:")
                 print(result.stdout)
-
         except subprocess.CalledProcessError as e:
             print(f"Erro ao executar {cmd[0]}:")
             if e.stdout:
@@ -186,22 +192,22 @@ colorspaces:
                 print(e.stderr)
             raise
 
-    def _run_feature_extraction(self, cache_dir: str) -> None:
+    def _run_feature_extraction(self, cache_dir: Path) -> None:
         """Extrai características das imagens"""
         # Criar diretórios necessários
-        features_dir = os.path.join(cache_dir, "features")
-        os.makedirs(features_dir, exist_ok=True)
+        features_dir = cache_dir / "features"
+        features_dir.mkdir(exist_ok=True)
 
         # Criar arquivo de lista de imagens
-        images_list = os.path.join(cache_dir, "images.txt")
+        images_list = cache_dir / "images.txt"
         with open(images_list, "w") as f:
             for img in sorted(os.listdir(self.input_directory)):
                 if img.lower().endswith((".png", ".jpg", ".jpeg")):
-                    img_path = os.path.join(self.input_directory, img)
+                    img_path = self.input_directory / img
                     f.write(f"{img_path}\n")
 
         # Verificar se há imagens
-        if not os.path.getsize(images_list):
+        if not images_list.stat().st_size:
             raise ValueError(
                 f"Nenhuma imagem encontrada no diretório: {self.input_directory}"
             )
@@ -209,10 +215,10 @@ colorspaces:
         print(f"Processando {sum(1 for _ in open(images_list))} imagens")
 
         # Gerar arquivo SfM a partir da lista de imagens
-        sfm_file = os.path.join(cache_dir, "sfm.json")
+        sfm_file = cache_dir / "sfm.json"
 
-        sensor_db = os.path.join(self.alicevision_share, "cameraSensors.db")
-        if not os.path.exists(sensor_db):
+        sensor_db = self.alicevision_share / "cameraSensors.db"
+        if not sensor_db.exists():
             print(
                 f"Aviso: Arquivo de banco de dados de sensores não encontrado: {sensor_db}"
             )
@@ -222,24 +228,24 @@ colorspaces:
         cmd = [
             self._get_bin_path("aliceVision_cameraInit"),
             "--imageFolder",
-            self.input_directory,
+            str(self.input_directory),
             "--defaultFieldOfView",
             "45",
             "--verboseLevel",
             "info",
             "--output",
-            sfm_file,
+            str(sfm_file),
         ]
 
         if sensor_db:
-            cmd.extend(["--sensorDatabase", sensor_db])
+            cmd.extend(["--sensorDatabase", str(sensor_db)])
         else:
             cmd.extend(["--defaultCameraModel", "pinhole"])
 
         self._run_command(cmd)
 
         # Verificar se o arquivo SfM foi gerado
-        if not os.path.exists(sfm_file):
+        if not sfm_file.exists():
             raise RuntimeError(f"Falha ao gerar arquivo SfM: {sfm_file}")
 
         # Verificar integridade do arquivo
@@ -251,9 +257,9 @@ colorspaces:
         cmd = [
             self._get_bin_path("aliceVision_featureExtraction"),
             "--input",
-            sfm_file,
+            str(sfm_file),
             "--output",
-            features_dir,
+            str(features_dir),
             "--describerTypes",
             "sift",
             "--verboseLevel",
@@ -265,44 +271,85 @@ colorspaces:
 
         self._run_command(cmd)
 
-    def _run_image_matching(self, cache_dir: str) -> None:
+    def _run_image_matching(self, cache_dir: Path) -> None:
         """Realiza matching entre imagens"""
         # Criar diretórios necessários
-        matches_dir = os.path.join(cache_dir, "matches")
-        os.makedirs(matches_dir, exist_ok=True)
+        matches_dir = cache_dir / "matches"
+        matches_dir.mkdir(exist_ok=True)
 
-        cmd = [
-            self._get_bin_path("aliceVision_imageMatching"),
-            "--input",
-            os.path.join(cache_dir, "sfm.json"),
-            "--output",
-            matches_dir,
-            "--featuresFolders",
-            os.path.join(cache_dir, "features"),
-            "--method",
-            "VocabularyTree",
-            "--tree",
-            os.path.join(self.alicevision_share, "vlfeat_K80L3.SIFT.tree"),
-            "--verboseLevel",
-            "info",
-        ]
-        self._run_command(cmd)
+        # Verificar se o arquivo SfM existe
+        sfm_file = cache_dir / "sfm.json"
+        if not sfm_file.exists():
+            raise RuntimeError(f"Arquivo SfM não encontrado: {sfm_file}")
 
-    def _run_feature_matching(self, cache_dir: str) -> None:
+        # Debug: Imprimir conteúdo do sfm.json
+        print("\nConteúdo do sfm.json:")
+        with open(sfm_file) as f:
+            sfm_data = json.load(f)
+            print(json.dumps(sfm_data, indent=2))
+
+        # Verificar se o arquivo tree existe
+        tree_file = self.alicevision_share / "vlfeat_K80L3.SIFT.tree"
+        if not tree_file.exists():
+            raise RuntimeError(f"Arquivo tree não encontrado: {tree_file}")
+
+        # Gerar pares de imagens
+        image_pairs_file = matches_dir / "image_pairs.txt"
+        views = sfm_data.get("views", [])
+        pairs = []
+        for i in range(len(views) - 1):
+            view_id1 = views[i].get("viewId")
+            view_id2 = views[i + 1].get("viewId")
+            if view_id1 is not None and view_id2 is not None:
+                try:
+                    view_id1 = int(view_id1)
+                    view_id2 = int(view_id2)
+                except ValueError:
+                    print(
+                        f"Aviso: ViewIds '{view_id1}' e/ou '{view_id2}' não são números inteiros. Usando índices {i} e {i+1}."
+                    )
+                    view_id1 = i
+                    view_id2 = i + 1
+                pairs.append(f"{view_id1} {view_id2}")
+
+        print("\nPares de imagens gerados:")
+        for pair in pairs:
+            print(f"  - {pair}")
+
+        with open(image_pairs_file, "w") as f:
+            f.write("\n".join(pairs))
+            f.write("\n")  # Adiciona uma linha em branco no final
+
+    def _run_feature_matching(self, cache_dir: Path) -> None:
         """Executa o matching de características"""
-        image_pairs_file = os.path.join(cache_dir, "matches", "image_pairs.txt")
-        if not os.path.exists(image_pairs_file):
-            raise RuntimeError(f"Arquivo image_pairs.txt não encontrado em: {image_pairs_file}. Verifique o comando aliceVision_imageMatching.")
+        image_pairs_file = cache_dir / "matches" / "image_pairs.txt"
+        if not image_pairs_file.exists():
+            raise RuntimeError(
+                f"Arquivo image_pairs.txt não encontrado em: {image_pairs_file}. Verifique o comando aliceVision_imageMatching."
+            )
+
+        # Debug: Imprimir conteúdo do arquivo de pares
+        print("\nConteúdo do arquivo image_pairs.txt:")
+        with open(image_pairs_file) as f:
+            print(f.read())
+
+        # Verificar se o diretório de features existe e tem arquivos
+        features_dir = cache_dir / "features"
+        if not features_dir.exists() or not any(features_dir.iterdir()):
+            raise RuntimeError(
+                f"Diretório de features vazio ou não encontrado: {features_dir}"
+            )
+
         cmd = [
             self._get_bin_path("aliceVision_featureMatching"),
             "--input",
-            os.path.join(cache_dir, "sfm.json"),  # Caminho correto
+            str(cache_dir / "sfm.json"),
             "--output",
-            os.path.join(cache_dir, "matches"),
+            str(cache_dir / "matches"),
             "--featuresFolders",
-            os.path.join(cache_dir, "features"),
+            str(features_dir),
             "--imagePairs",
-            os.path.join(cache_dir, "matches", "image_pairs.txt"),
+            str(image_pairs_file),
             "--describerTypes",
             "sift",
             "--photometricMatchingMethod",
@@ -316,92 +363,202 @@ colorspaces:
             "--verboseLevel",
             "info",
         ]
-        self._run_command(cmd)
 
-    def _run_structure_from_motion(self, cache_dir: str) -> None:
+        try:
+            self._run_command(cmd)
+        except subprocess.CalledProcessError as e:
+            print(f"\nErro no feature matching. Saída do comando:")
+            if hasattr(e, "stdout"):
+                print("Saída padrão:")
+                print(e.stdout)
+            if hasattr(e, "stderr"):
+                print("Saída de erro:")
+                print(e.stderr)
+            raise
+
+    def _run_structure_from_motion(self, cache_dir: Path) -> None:
         """Executa a reconstrução da estrutura a partir do movimento"""
+        env = os.environ.copy()
+        # Remover a linha abaixo para usar a GPU
+        # env["ALICEVISION_USE_CUDA"] = "0"  # Adicionado: forçar o uso da CPU
+        output_sfm_path = cache_dir / "sfm.json"
         cmd = [
             self._get_bin_path("aliceVision_incrementalSfM"),
             "--input",
-            os.path.join(cache_dir, "features", "sfm.json"),
+            str(cache_dir / "sfm.json"),
             "--output",
-            os.path.join(cache_dir, "sfm"),
+            str(output_sfm_path),
             "--matchesFolder",
-            os.path.join(cache_dir, "matches"),
+            str(cache_dir / "matches"),
+            "--featuresFolders",
+            str(cache_dir / "features"),
+            "--minAngleInitialPair",
+            "3",  # Ajustado: reduzir o ângulo mínimo para o par inicial
+            "--maxAngleInitialPair",
+            "50",  # Ajustado: aumentar o ângulo máximo para o par inicial
+            "--minNumberOfMatches",
+            "50",  # Ajustado: aumentar o número mínimo de correspondências
         ]
-        self._run_command(cmd)
+        self._run_command(cmd, env=env)  # Passar o ambiente modificado
+        # Verificar ambos os locais possíveis
+        possible_sfm_paths = [
+            output_sfm_path,  # Localização direta no cache_dir
+            cache_dir / "sfm" / "sfm.json",  # Subdiretório sfm
+        ]
+        sfm_json_path = None
+        for path in possible_sfm_paths:
+            if path.exists():
+                sfm_json_path = path
+                break
 
-    def _run_prepare_dense_scene(self, cache_dir: str) -> None:
-        """Prepara a cena para reconstrução densa"""
+        if not sfm_json_path:
+            available_files = "\n".join(str(p) for p in cache_dir.glob("*"))
+            raise FileNotFoundError(
+                f"Arquivo sfm.json não encontrado em nenhum local possível.\n"
+                f"Locais verificados:\n"
+                f"- {possible_sfm_paths[0]}\n"
+                f"- {possible_sfm_paths[1]}\n"
+                f"Conteúdo do diretório cache:\n{available_files}"
+            )
+
+        # Adicionado: verificar se o arquivo sfm.json foi gerado
+        sfm_json_path = cache_dir / "sfm" / "sfm.json"
+        if not sfm_json_path.exists():
+            raise FileNotFoundError(
+                f"O arquivo sfm.json não foi gerado: {sfm_json_path}"
+            )
+
+        # Adicionado: verificar o conteúdo do arquivo sfm.json
+        try:
+            with open(sfm_json_path, "r") as f:
+                sfm_data = json.load(f)
+            print(f"Conteúdo do arquivo sfm.json: {json.dumps(sfm_data, indent=2)}")
+        except Exception as e:
+            print(f"Erro ao ler o arquivo sfm.json: {e}")
+
+        # Adicionado: verificar se o arquivo sfm.json está vazio
+        if sfm_data.get("structure", {}).get("views", []):
+            print("O arquivo sfm.json contém dados de estrutura.")
+        else:
+            print("O arquivo sfm.json está vazio ou não contém dados de estrutura.")
+            raise ValueError(
+                "O arquivo sfm.json está vazio ou não contém dados de estrutura."
+            )
+
+        # Adicionado: verificar se o arquivo sfm.json no diretório cache está sendo usado corretamente
+        cache_sfm_json_path = cache_dir / "sfm.json"
+        if cache_sfm_json_path.exists():
+            print(
+                f"O arquivo sfm.json existe no diretório cache: {cache_sfm_json_path}"
+            )
+            try:
+                with open(cache_sfm_json_path, "r") as f:
+                    cache_sfm_data = json.load(f)
+                print(
+                    f"Conteúdo do arquivo sfm.json no diretório cache: {json.dumps(cache_sfm_data, indent=2)}"
+                )
+            except Exception as e:
+                print(f"Erro ao ler o arquivo sfm.json no diretório cache: {e}")
+        else:
+            print(
+                f"O arquivo sfm.json não existe no diretório cache: {cache_sfm_json_path}"
+            )
+
+        # Adicionado: verificar se o arquivo sfm.json no diretório sfm está sendo usado corretamente
+        sfm_dir_sfm_json_path = cache_dir / "sfm" / "sfm.json"
+        if sfm_dir_sfm_json_path.exists():
+            print(
+                f"O arquivo sfm.json existe no diretório sfm: {sfm_dir_sfm_json_path}"
+            )
+            try:
+                with open(sfm_dir_sfm_json_path, "r") as f:
+                    sfm_dir_sfm_data = json.load(f)
+                print(
+                    f"Conteúdo do arquivo sfm.json no diretório sfm: {json.dumps(sfm_dir_sfm_data, indent=2)}"
+                )
+            except Exception as e:
+                print(f"Erro ao ler o arquivo sfm.json no diretório sfm: {e}")
+        else:
+            print(
+                f"O arquivo sfm.json não existe no diretório sfm: {sfm_dir_sfm_json_path}"
+            )
+
+    def _run_prepare_dense_scene(self, cache_dir: Path) -> None:
+        """Prepara a cena para a reconstrução densa"""
+        # Adicionado: verificar o conteúdo do diretório cache
+        print("Conteúdo do diretório cache:")
+        for item in cache_dir.iterdir():
+            print(f"  - {item}")
+
         cmd = [
             self._get_bin_path("aliceVision_prepareDenseScene"),
             "--input",
-            os.path.join(cache_dir, "sfm", "sfm.json"),
+            str(cache_dir / "sfm" / "sfm.json"),
             "--output",
-            os.path.join(cache_dir, "mvsData"),
+            str(cache_dir / "mvsData"),
         ]
         self._run_command(cmd)
 
-    def _run_depth_map_estimation(self, cache_dir: str) -> None:
+    def _run_depth_map_estimation(self, cache_dir: Path) -> None:
         """Estima mapas de profundidade"""
         cmd = [
             self._get_bin_path("aliceVision_depthMapEstimation"),
             "--input",
-            os.path.join(cache_dir, "mvsData", "sfm.json"),
+            str(cache_dir / "mvsData" / "sfm.json"),
             "--output",
-            os.path.join(cache_dir, "depthMap"),
+            str(cache_dir / "depthMap"),
         ]
         self._run_command(cmd)
 
-    def _run_depth_map_filter(self, cache_dir: str) -> None:
+    def _run_depth_map_filter(self, cache_dir: Path) -> None:
         """Filtra mapas de profundidade"""
         cmd = [
             self._get_bin_path("aliceVision_depthMapFiltering"),
             "--input",
-            os.path.join(cache_dir, "mvsData", "sfm.json"),
+            str(cache_dir / "mvsData" / "sfm.json"),
             "--depthMapsFolder",
-            os.path.join(cache_dir, "depthMap"),
+            str(cache_dir / "depthMap"),
             "--output",
-            os.path.join(cache_dir, "depthMap_filtered"),
+            str(cache_dir / "depthMap_filtered"),
         ]
         self._run_command(cmd)
 
-    def _run_meshing(self, cache_dir: str) -> None:
+    def _run_meshing(self, cache_dir: Path) -> None:
         """Cria a malha 3D"""
         cmd = [
             self._get_bin_path("aliceVision_meshing"),
             "--input",
-            os.path.join(cache_dir, "mvsData", "sfm.json"),
+            str(cache_dir / "mvsData" / "sfm.json"),
             "--depthMapsFolder",
-            os.path.join(cache_dir, "depthMap_filtered"),
+            str(cache_dir / "depthMap_filtered"),
             "--output",
-            os.path.join(cache_dir, "mesh.obj"),
+            str(cache_dir / "mesh.obj"),
         ]
         self._run_command(cmd)
 
-    def _run_mesh_filtering(self, cache_dir: str) -> None:
+    def _run_mesh_filtering(self, cache_dir: Path) -> None:
         """Filtra a malha 3D"""
         cmd = [
             self._get_bin_path("aliceVision_meshFiltering"),
             "--input",
-            os.path.join(cache_dir, "mesh.obj"),
+            str(cache_dir / "mesh.obj"),
             "--output",
-            os.path.join(cache_dir, "mesh_filtered.obj"),
+            str(cache_dir / "mesh_filtered.obj"),
         ]
         self._run_command(cmd)
 
-    def _run_texturing(self, cache_dir: str) -> None:
+    def _run_texturing(self, cache_dir: Path) -> None:
         """Aplica textura à malha 3D"""
         cmd = [
             self._get_bin_path("aliceVision_texturing"),
             "--input",
-            os.path.join(cache_dir, "mesh_filtered.obj"),
+            str(cache_dir / "mesh_filtered.obj"),
             "--imagesFolder",
-            self.input_directory,
+            str(self.input_directory),
             "--inputMesh",
-            os.path.join(cache_dir, "mesh_filtered.obj"),
+            str(cache_dir / "mesh_filtered.obj"),
             "--output",
-            os.path.join(self.output_directory, "textured_model"),
+            str(self.output_directory / "textured_model"),
         ]
         self._run_command(cmd)
 

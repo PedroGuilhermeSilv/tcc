@@ -1,8 +1,12 @@
 from converter.services.export_img import VideoFrameExtractor
 from object_values.type_videos import TypeVideos
+from setup_env import setup_environment
 
 
 def main():
+    # Configura as variáveis de ambiente antes de executar
+    setup_environment()
+    
     path_video = "src/tmp/videos"
     name_video = "IMG_1115"
     format = TypeVideos.MOV

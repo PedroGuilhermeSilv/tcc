@@ -40,7 +40,7 @@ async def upload_video(
     video_path = f"src/tmp/uploads/{video_id}"
     os.makedirs(video_path, exist_ok=True)
 
-    file_path = os.path.join(video_path, f"{pet_name}.mp4")
+    file_path = os.path.join(video_path, f"{pet_name}.MOV")
     with open(file_path, "wb") as buffer:
         content = await video_file.read()
         buffer.write(content)

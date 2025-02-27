@@ -67,7 +67,7 @@ class VideoFrameExtractor:
         blur_score = cv2.Laplacian(gray, cv2.CV_64F).var()
         print(f"Pontuação de nitidez: {blur_score}")
 
-        if blur_score <= 90:  # Imagem borrada
+        if blur_score <= 40:  # Imagem borrada
             os.remove(image_path)
             return True
 

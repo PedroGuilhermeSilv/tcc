@@ -18,7 +18,7 @@ def process_video(video_id, video_path, pet_name):
             path_video=video_path,
             path_image_metadata="src/tmp/base-sem-flash.HEIC",
             name_video=pet_name,
-            format=TypeVideos.MP4,
+            format=TypeVideos.MOV,
         )
         extractor.execute()
 
