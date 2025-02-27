@@ -7,6 +7,7 @@ __pycache__/
 *.so
 */Meshroom-2023.3.0/*
 # Distribution / packaging
+/tmp/*
 .Python
 build/
 develop-eggs/

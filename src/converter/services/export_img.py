@@ -1,6 +1,7 @@
 import os
 from dataclasses import dataclass
 from typing import Tuple, Optional
+import subprocess
 
 import cv2
 from cv2.typing import MatLike
@@ -98,32 +99,43 @@ class VideoFrameExtractor:
         print(f"Gerando modelo 3D em: {output_dir}")
 
         try:
-            # Tentar primeiro com MeshroomProcessor (mais confiável)
-            from converter.services.meshroom_processor import MeshroomProcessor
+            # Usar AliceVision diretamente
+            from converter.services.alicevision_processor import AliceVisionProcessor
 
-            meshroom_path = os.environ.get(
-                "MESHROOM_BINARY",
-                "/home/pedro/dev/tcc/src/Meshroom-2023.3.0/meshroom_batch",
-            )
+            # Procurar o AliceVision em vários locais possíveis
+            possible_paths = [
+                # 1. Caminho padrão do AliceVision
+                "/home/pedro/dev/tcc/src/Meshroom-2023.3.0/aliceVision/bin",
+                # 2. Usar variável de ambiente
+                os.environ.get("ALICEVISION_BIN_PATH", ""),
+                # 3. Procurar no PATH
+                "/usr/local/bin/aliceVision",
+                "/usr/bin/aliceVision",
+            ]
 
-            if os.path.exists(meshroom_path):
-                print(f"Usando Meshroom para processamento: {meshroom_path}")
-                processor = MeshroomProcessor(
+            alicevision_path = None
+            for path in possible_paths:
+                if path and os.path.exists(path):
+                    alicevision_path = path
+                    break
+
+            if alicevision_path:
+                print(f"Usando AliceVision para processamento: {alicevision_path}")
+                processor = AliceVisionProcessor(
                     input_directory=frames_directory,
                     output_directory=output_dir,
-                    meshroom_binary=meshroom_path,
+                    alicevision_bin_path=alicevision_path,
+                    force_cpu=True,  # Opcional, remova se tiver GPU
                 )
                 processor.process_images()
                 return
 
-            # Se Meshroom não estiver disponível, tentar AliceVision
-            print("Meshroom não encontrado. Tentando AliceVision...")
-            from converter.services.alicevision_processor import AliceVisionProcessor
-
-            alicevision = AliceVisionProcessor(
-                input_directory=frames_directory, output_directory=output_dir
-            )
-            alicevision.process_images()
+            # Se ainda não conseguiu, mostrar erro detalhado
+            print("Erro: Não foi possível encontrar o AliceVision em nenhum local:")
+            for path in possible_paths:
+                print(f"- Tentado: {path}")
+            print("Por favor, instale o AliceVision ou configure o caminho correto.")
+            raise FileNotFoundError("AliceVision não encontrado")
 
         except Exception as e:
             print(f"Erro ao gerar modelo 3D: {e}")

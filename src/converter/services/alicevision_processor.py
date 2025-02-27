@@ -1,5 +1,6 @@
 import os
 import subprocess
+import requests
 from dataclasses import dataclass
 from typing import List, Optional
 
@@ -12,117 +13,123 @@ class AliceVisionProcessor:
         "ALICEVISION_BIN_PATH",
         "/home/pedro/dev/tcc/src/Meshroom-2023.3.0/aliceVision/bin",
     )
+    force_cpu: bool = False
+    verbose: bool = True
 
     def __post_init__(self):
         # Converte caminhos relativos para absolutos
         self.input_directory = os.path.abspath(self.input_directory)
         self.output_directory = os.path.abspath(self.output_directory)
+        self.alicevision_bin_path = os.path.abspath(self.alicevision_bin_path)
 
         # Verificar se o diretório dos binários existe
         if not os.path.exists(self.alicevision_bin_path):
             raise ValueError(
                 f"O diretório de binários AliceVision não existe: {self.alicevision_bin_path}"
-                "\nConfigure a variável de ambiente ALICEVISION_BIN_PATH corretamente."
             )
 
-        self.alicevision_bin_path = os.path.abspath(self.alicevision_bin_path)
+        # Configurar diretórios
+        self.alicevision_root = os.path.dirname(
+            os.path.dirname(self.alicevision_bin_path)
+        )
+        self.alicevision_lib_path = os.path.join(
+            os.path.dirname(self.alicevision_bin_path), "lib"
+        )
 
-        # Procurar diretório de bibliotecas em vários locais possíveis
-        possible_lib_paths = [
-            # 1. Dentro do diretório AliceVision
-            os.path.join(os.path.dirname(self.alicevision_bin_path), "lib"),
-            # 2. No mesmo nível que o diretório bin do AliceVision
-            os.path.join(
-                os.path.dirname(os.path.dirname(self.alicevision_bin_path)), "lib"
-            ),
-            # 3. Dois níveis acima (instalação típica)
-            os.path.join(
-                os.path.dirname(
-                    os.path.dirname(os.path.dirname(self.alicevision_bin_path))
-                ),
-                "lib",
-            ),
-            # 4. No próprio diretório bin (algumas distribuições colocam tudo junto)
-            self.alicevision_bin_path,
-        ]
+        # Configurar diretório share e arquivo OCIO
+        self.alicevision_share = os.path.join(
+            self.alicevision_root, "share/aliceVision"
+        )
+        os.makedirs(self.alicevision_share, exist_ok=True)
 
-        # Testar cada caminho possível
-        self.alicevision_lib_path = None
-        for lib_path in possible_lib_paths:
-            if os.path.exists(lib_path):
-                # Verificar se contém as bibliotecas do AliceVision
-                try:
-                    files = os.listdir(lib_path)
-                    if any(f.startswith("libaliceVision") for f in files):
-                        self.alicevision_lib_path = lib_path
-                        print(f"Encontradas bibliotecas do AliceVision em: {lib_path}")
-                        break
-                except Exception:
-                    pass
+        self.ocio_path = os.path.join(self.alicevision_share, "config.ocio")
+        if not os.path.exists(self.ocio_path):
+            with open(self.ocio_path, "w") as f:
+                f.write(
+                    """ocio_profile_version: 2
 
-        # Se não encontrar, usar o diretório bin como fallback
-        if not self.alicevision_lib_path:
-            print(
-                "Aviso: Não foi possível encontrar as bibliotecas do AliceVision. Usando o diretório bin como fallback."
+search_path: ""
+strictparsing: true
+luma: [0.2126, 0.7152, 0.0722]
+
+roles:
+  default: raw
+  scene_linear: raw
+
+displays:
+  sRGB:
+    - !<View> {name: Raw, colorspace: raw}
+
+colorspaces:
+  - !<ColorSpace>
+    name: raw
+    family: raw
+    equalitygroup: ""
+    bitdepth: 32f
+    isdata: false
+    allocation: uniform"""
+                )
+
+        # Verificar se as bibliotecas existem
+        if not os.path.exists(self.alicevision_lib_path):
+            raise ValueError(
+                f"Diretório de bibliotecas não encontrado: {self.alicevision_lib_path}"
             )
-            self.alicevision_lib_path = self.alicevision_bin_path
 
+        # Listar bibliotecas disponíveis para debug
+        print("Bibliotecas disponíveis no diretório lib:")
+        for lib in sorted(os.listdir(self.alicevision_lib_path)):
+            print(f"  - {lib}")
+
+        print(f"Usando AliceVision em: {self.alicevision_bin_path}")
         print(f"Diretório de entrada: {self.input_directory}")
         print(f"Diretório de saída: {self.output_directory}")
-        print(f"Caminho do AliceVision: {self.alicevision_bin_path}")
-        print(f"Caminho de bibliotecas do AliceVision: {self.alicevision_lib_path}")
+        print(f"Arquivo OCIO: {self.ocio_path}")
 
-        # Verificar a instalação
-        self._verify_installation()
+        # Verificar e criar arquivos essenciais
+        essential_files = {
+            "cameraSensors.db": "https://github.com/alicevision/AliceVision/raw/develop/src/aliceVision/sensorDB/cameraSensors.db",
+            "vlfeat_K80L3.SIFT.tree": "https://github.com/alicevision/AliceVision/raw/develop/src/aliceVision/voctree/vlfeat_K80L3.SIFT.tree",
+        }
+
+        for file_name, url in essential_files.items():
+            file_path = os.path.join(self.alicevision_share, file_name)
+            if not os.path.exists(file_path):
+                print(f"Baixando arquivo essencial: {file_name}")
+                try:
+                    response = requests.get(url, timeout=10)
+                    with open(file_path, "wb") as f:
+                        f.write(response.content)
+                    print(f"Arquivo {file_name} baixado com sucesso.")
+                except Exception as download_error:
+                    print(f"Falha ao baixar {file_name}: {download_error}")
+                    print("O processo pode não funcionar corretamente.")
 
     def process_images(self) -> None:
         """Processa imagens usando AliceVision para criar modelo 3D"""
-        if not os.path.exists(self.output_directory):
-            os.makedirs(self.output_directory)
-
-        # Cria diretórios para cada etapa do pipeline
-        cache_dir = os.path.join(self.output_directory, "cache")
-        os.makedirs(cache_dir, exist_ok=True)
-
-        print(f"Usando AliceVision em: {self.alicevision_bin_path}")
-
-        # Executa o pipeline do AliceVision
         try:
-            # 1. Feature Extraction
+            # Criar diretório de cache
+            cache_dir = os.path.join(self.output_directory, "cache")
+            os.makedirs(cache_dir, exist_ok=True)
+
+            # Pipeline completo do AliceVision
             self._run_feature_extraction(cache_dir)
-
-            # 2. Image Matching
             self._run_image_matching(cache_dir)
-
-            # 3. Feature Matching
             self._run_feature_matching(cache_dir)
-
-            # 4. Structure from Motion
             self._run_structure_from_motion(cache_dir)
-
-            # 5. Prepare Dense Scene
             self._run_prepare_dense_scene(cache_dir)
-
-            # 6. Depth Map Estimation
             self._run_depth_map_estimation(cache_dir)
-
-            # 7. Depth Map Filter
             self._run_depth_map_filter(cache_dir)
-
-            # 8. Meshing
             self._run_meshing(cache_dir)
-
-            # 9. Mesh Filtering
             self._run_mesh_filtering(cache_dir)
-
-            # 10. Texturing
             self._run_texturing(cache_dir)
 
             print(
-                f"3D reconstruction completed. Output saved to {self.output_directory}"
+                f"Reconstrução 3D completada. Saída salva em: {self.output_directory}"
             )
-        except subprocess.CalledProcessError as e:
-            print(f"Error during AliceVision processing: {e}")
+
+        except Exception as e:
+            print(f"Erro durante o processamento AliceVision: {e}")
             raise
 
     def _get_bin_path(self, binary_name: str) -> str:
@@ -130,68 +137,184 @@ class AliceVisionProcessor:
         return os.path.join(self.alicevision_bin_path, binary_name)
 
     def _run_command(self, cmd: List[str]) -> None:
-        """Executa um comando com o ambiente configurado para as bibliotecas do AliceVision"""
-        # Copiar o ambiente atual
+        """Executa um comando do AliceVision com o ambiente configurado"""
+        print(f"Executando: {' '.join(cmd)}")
+
+        # Configurar ambiente
         env = os.environ.copy()
 
-        # Adicionar ou atualizar o LD_LIBRARY_PATH
-        current_ld_lib_path = env.get("LD_LIBRARY_PATH", "")
-        if current_ld_lib_path:
-            env["LD_LIBRARY_PATH"] = (
-                f"{self.alicevision_lib_path}:{current_ld_lib_path}"
-            )
-        else:
-            env["LD_LIBRARY_PATH"] = self.alicevision_lib_path or ""
+        # Configurar caminho das bibliotecas
+        lib_paths = [
+            self.alicevision_lib_path,
+            "/usr/lib",
+            "/usr/local/lib",
+            "/home/pedro/dev/tcc/src/Meshroom-2023.3.0/lib",
+            "/home/pedro/dev/tcc/src/Meshroom-2023.3.0/aliceVision/lib",
+        ]
+        env["LD_LIBRARY_PATH"] = (
+            ":".join([path for path in lib_paths if os.path.exists(path)])
+            + ":"
+            + env.get("LD_LIBRARY_PATH", "")
+        )
 
-        # Configurar ALICEVISION_ROOT - normalmente é o diretório pai do diretório bin
-        alicevision_root = os.path.dirname(os.path.dirname(self.alicevision_bin_path))
-        env["ALICEVISION_ROOT"] = alicevision_root
+        # Configurar variáveis de ambiente do AliceVision
+        env["ALICEVISION_ROOT"] = self.alicevision_root
+        env["ALICEVISION_SHARE"] = self.alicevision_share
+        env["OCIO"] = self.ocio_path
 
-        print(f"Executando: {' '.join(cmd)}")
         print(f"Com LD_LIBRARY_PATH: {env['LD_LIBRARY_PATH']}")
         print(f"Com ALICEVISION_ROOT: {env['ALICEVISION_ROOT']}")
+        print(f"Com ALICEVISION_SHARE: {env['ALICEVISION_SHARE']}")
+        print(f"Com OCIO: {env['OCIO']}")
 
-        # Executar o comando com o ambiente modificado
-        subprocess.run(cmd, check=True, env=env)
+        try:
+            result = subprocess.run(
+                cmd, check=True, env=env, capture_output=True, text=True
+            )
+
+            if result.stdout and self.verbose:
+                print("Saída:")
+                print(result.stdout)
+
+        except subprocess.CalledProcessError as e:
+            print(f"Erro ao executar {cmd[0]}:")
+            if e.stdout:
+                print("Saída padrão:")
+                print(e.stdout)
+            if e.stderr:
+                print("Saída de erro:")
+                print(e.stderr)
+            raise
 
     def _run_feature_extraction(self, cache_dir: str) -> None:
-        """Executa a extração de características das imagens"""
+        """Extrai características das imagens"""
+        # Criar diretórios necessários
+        features_dir = os.path.join(cache_dir, "features")
+        os.makedirs(features_dir, exist_ok=True)
+
+        # Criar arquivo de lista de imagens
+        images_list = os.path.join(cache_dir, "images.txt")
+        with open(images_list, "w") as f:
+            for img in sorted(os.listdir(self.input_directory)):
+                if img.lower().endswith((".png", ".jpg", ".jpeg")):
+                    img_path = os.path.join(self.input_directory, img)
+                    f.write(f"{img_path}\n")
+
+        # Verificar se há imagens
+        if not os.path.getsize(images_list):
+            raise ValueError(
+                f"Nenhuma imagem encontrada no diretório: {self.input_directory}"
+            )
+
+        print(f"Processando {sum(1 for _ in open(images_list))} imagens")
+
+        # Gerar arquivo SfM a partir da lista de imagens
+        sfm_file = os.path.join(cache_dir, "sfm.json")
+
+        sensor_db = os.path.join(self.alicevision_share, "cameraSensors.db")
+        if not os.path.exists(sensor_db):
+            print(
+                f"Aviso: Arquivo de banco de dados de sensores não encontrado: {sensor_db}"
+            )
+            print("Tentando prosseguir sem o banco de dados de sensores...")
+            sensor_db = None
+
+        cmd = [
+            self._get_bin_path("aliceVision_cameraInit"),
+            "--imageFolder",
+            self.input_directory,
+            "--defaultFieldOfView",
+            "45",
+            "--verboseLevel",
+            "info",
+            "--output",
+            sfm_file,
+        ]
+
+        if sensor_db:
+            cmd.extend(["--sensorDatabase", sensor_db])
+        else:
+            cmd.extend(["--defaultCameraModel", "pinhole"])
+
+        self._run_command(cmd)
+
+        # Verificar se o arquivo SfM foi gerado
+        if not os.path.exists(sfm_file):
+            raise RuntimeError(f"Falha ao gerar arquivo SfM: {sfm_file}")
+
+        # Verificar integridade do arquivo
+        with open(sfm_file, "r") as f:
+            if not f.read().strip():
+                raise RuntimeError(f"Arquivo SfM vazio: {sfm_file}")
+
+        # Configurar comando de extração de características
         cmd = [
             self._get_bin_path("aliceVision_featureExtraction"),
             "--input",
-            self.input_directory,
+            sfm_file,
             "--output",
-            os.path.join(cache_dir, "features"),
+            features_dir,
             "--describerTypes",
             "sift",
-            "--forceCpuExtraction",
-            "1",
+            "--verboseLevel",
+            "info",
         ]
+
+        if self.force_cpu:
+            cmd.extend(["--forceCpuExtraction", "1"])
+
         self._run_command(cmd)
 
     def _run_image_matching(self, cache_dir: str) -> None:
-        """Executa o matching de imagens"""
+        """Realiza matching entre imagens"""
+        # Criar diretórios necessários
+        matches_dir = os.path.join(cache_dir, "matches")
+        os.makedirs(matches_dir, exist_ok=True)
+
         cmd = [
             self._get_bin_path("aliceVision_imageMatching"),
             "--input",
-            os.path.join(cache_dir, "features", "sfm.json"),
+            os.path.join(cache_dir, "sfm.json"),
             "--output",
-            os.path.join(cache_dir, "matches"),
+            matches_dir,
+            "--featuresFolders",
+            os.path.join(cache_dir, "features"),
+            "--method",
+            "VocabularyTree",
             "--tree",
-            os.path.join(cache_dir, "features", "tree.json"),
+            os.path.join(self.alicevision_share, "vlfeat_K80L3.SIFT.tree"),
+            "--verboseLevel",
+            "info",
         ]
         self._run_command(cmd)
 
     def _run_feature_matching(self, cache_dir: str) -> None:
         """Executa o matching de características"""
+        image_pairs_file = os.path.join(cache_dir, "matches", "image_pairs.txt")
+        if not os.path.exists(image_pairs_file):
+            raise RuntimeError(f"Arquivo image_pairs.txt não encontrado em: {image_pairs_file}. Verifique o comando aliceVision_imageMatching.")
         cmd = [
             self._get_bin_path("aliceVision_featureMatching"),
             "--input",
-            os.path.join(cache_dir, "features", "sfm.json"),
+            os.path.join(cache_dir, "sfm.json"),  # Caminho correto
             "--output",
             os.path.join(cache_dir, "matches"),
+            "--featuresFolders",
+            os.path.join(cache_dir, "features"),
             "--imagePairs",
             os.path.join(cache_dir, "matches", "image_pairs.txt"),
+            "--describerTypes",
+            "sift",
+            "--photometricMatchingMethod",
+            "ANN_L2",
+            "--geometricEstimator",
+            "acransac",
+            "--geometricFilterType",
+            "fundamental_matrix",
+            "--distanceRatio",
+            "0.8",
+            "--verboseLevel",
+            "info",
         ]
         self._run_command(cmd)
 
@@ -213,7 +336,7 @@ class AliceVisionProcessor:
         cmd = [
             self._get_bin_path("aliceVision_prepareDenseScene"),
             "--input",
-            os.path.join(cache_dir, "sfm", "sfm.abc"),
+            os.path.join(cache_dir, "sfm", "sfm.json"),
             "--output",
             os.path.join(cache_dir, "mvsData"),
         ]
@@ -224,7 +347,7 @@ class AliceVisionProcessor:
         cmd = [
             self._get_bin_path("aliceVision_depthMapEstimation"),
             "--input",
-            os.path.join(cache_dir, "mvsData", "sfm.abc"),
+            os.path.join(cache_dir, "mvsData", "sfm.json"),
             "--output",
             os.path.join(cache_dir, "depthMap"),
         ]
@@ -235,7 +358,7 @@ class AliceVisionProcessor:
         cmd = [
             self._get_bin_path("aliceVision_depthMapFiltering"),
             "--input",
-            os.path.join(cache_dir, "mvsData", "sfm.abc"),
+            os.path.join(cache_dir, "mvsData", "sfm.json"),
             "--depthMapsFolder",
             os.path.join(cache_dir, "depthMap"),
             "--output",
@@ -248,7 +371,7 @@ class AliceVisionProcessor:
         cmd = [
             self._get_bin_path("aliceVision_meshing"),
             "--input",
-            os.path.join(cache_dir, "mvsData", "sfm.abc"),
+            os.path.join(cache_dir, "mvsData", "sfm.json"),
             "--depthMapsFolder",
             os.path.join(cache_dir, "depthMap_filtered"),
             "--output",
