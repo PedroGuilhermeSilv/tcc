@@ -12,7 +12,6 @@ import shutil
 def process_video(video_id, video_path, pet_name):
     """Processa um vídeo para extrair frames e gerar modelo 3D"""
     print(f"Processando vídeo: {video_id}, {video_path}, {pet_name}")
-
     try:
         extractor = VideoFrameExtractor(
             path_video=video_path,
@@ -21,7 +20,6 @@ def process_video(video_id, video_path, pet_name):
             format=TypeVideos.MOV,
         )
         extractor.execute()
-
         # Atualiza o status no banco de dados para "finalizado"
         db: Session = next(get_db())
         update_video_status(db, video_id, "finalizado")

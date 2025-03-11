@@ -44,20 +44,16 @@ async def upload_video(
     with open(file_path, "wb") as buffer:
         content = await video_file.read()
         buffer.write(content)
-
     # Cria um novo pet no banco de dados usando o modelo SQLAlchemy
     pet = Pet(name=pet_name, pet_type=pet_type, affected_limb=affected_limb)
-
     # Também cria um registro na tabela converters
     converter = Converter(
         id=video_id, name=pet_name, path_video=file_path, status="processing"
     )
-
     db: Session = next(get_db())
     create_pet(db, pet)
     db.add(converter)
     db.commit()
-
     # Envia a tarefa para a fila usando o novo caminho
     process_video.delay(video_id, video_path, pet_name)
 
