@@ -143,7 +143,7 @@ Referência:
 class MeshroomProcessor:
     input_directory: str
     output_directory: str
-    meshroom_binary: str = "Meshroom-2023.3.0/meshroom_batch"  # Default Meshroom CLI command
+    meshroom_binary: str = "Framework/meshroom_batch"  # Default Meshroom CLI command
 
     def process_images(self) -> None:
         """Process images using Meshroom to create 3D model"""

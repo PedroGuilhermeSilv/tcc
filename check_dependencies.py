@@ -11,9 +11,9 @@ def check_file_permissions(file_path):
 
 def check_alicevision_dependencies():
     # Verifica se o Meshroom está instalado no local correto
-    meshroom_path = Path("src/Meshroom-2023.3.0")
+    meshroom_path = Path("src/Framework")
     if not meshroom_path.exists():
-        print("❌ Meshroom não encontrado em src/Meshroom-2023.3.0")
+        print("❌ Meshroom não encontrado em src/Framework")
         return False
 
     # Verifica arquivos essenciais

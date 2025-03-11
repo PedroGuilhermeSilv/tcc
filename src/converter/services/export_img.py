@@ -1,14 +1,12 @@
 import os
 from dataclasses import dataclass
-from typing import Tuple, Optional
-import subprocess
-
+from converter.services.alicevision_processor import Processor
+from converter.services.alicevision_processor import AliceVisionProcessor
 import cv2
 from cv2.typing import MatLike
 from pyexiv2 import Image as ExivImage
 
 from object_values.type_videos import TypeVideos
-from converter.services.alicevision_processor import AliceVisionProcessor
 
 
 @dataclass
@@ -34,7 +32,15 @@ class VideoFrameExtractor:
             print("\n1. Extraindo frames do vídeo...")
             output_dir = self._process_video_frames(video)
             print("\n2. Iniciando geração do modelo 3D...")
-            self._generate_3d_model(output_dir)
+            self._generate_3d_model(
+                output_dir,
+                AliceVisionProcessor(
+                    input_directory=output_dir,
+                    output_directory=self.output_3d_path,
+                    alicevision_bin_path="/home/pedro/dev/tcc/src/Framework/aliceVision/bin",
+                    force_cpu=True,
+                ),
+            )
             print("\n=== Processamento concluído com sucesso! ===")
         finally:
             video.release()
@@ -97,7 +103,7 @@ class VideoFrameExtractor:
         except Exception as e:
             print(f"   ⚠ Erro ao copiar metadados: {str(e)}")
 
-    def _generate_3d_model(self, frames_directory: str) -> None:
+    def _generate_3d_model(self, frames_directory: str, processor: Processor) -> None:
         output_dir = os.path.join(
             self.output_3d_path, os.path.basename(frames_directory)
         )
@@ -105,31 +111,9 @@ class VideoFrameExtractor:
         print(f"   → Diretório do modelo 3D: {output_dir}")
 
         try:
-            possible_paths = [
-                "/home/pedro/dev/tcc/src/Meshroom-2023.3.0/aliceVision/bin",
-                os.environ.get("ALICEVISION_BIN_PATH", ""),
-                "/usr/local/bin/aliceVision",
-                "/usr/bin/aliceVision",
-            ]
-
-            alicevision_path = None
-            for path in possible_paths:
-                if path and os.path.exists(path):
-                    alicevision_path = path
-                    break
-
-            if alicevision_path:
-                print(f"   → AliceVision encontrado em: {alicevision_path}")
-                processor = AliceVisionProcessor(
-                    input_directory=frames_directory,
-                    output_directory=output_dir,
-                    alicevision_bin_path=alicevision_path,
-                    force_cpu=True,
-                )
-                processor.process_images()
-                print("   ✓ Modelo 3D gerado com sucesso!")
-                return
-            raise FileNotFoundError("AliceVision não encontrado")
+            processor.process_images()
+            print("   ✓ Modelo 3D gerado com sucesso!")
+            return
 
         except Exception as e:
             print(f"\n   ❌ Erro ao gerar modelo 3D: {str(e)}")

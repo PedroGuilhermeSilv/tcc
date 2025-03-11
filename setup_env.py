@@ -8,7 +8,7 @@ def setup_environment():
     project_root = Path(__file__).parent.absolute()
 
     # Define os caminhos do AliceVision
-    alicevision_root = project_root / "src" / "Meshroom-2023.3.0"
+    alicevision_root = project_root / "src" / "Framework"
     alicevision_share = alicevision_root / "share" / "aliceVision"
     alicevision_lib = alicevision_root / "lib"
     alicevision_bin = alicevision_root / "aliceVision" / "bin"

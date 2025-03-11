@@ -13,7 +13,7 @@ def create_pet(db: Session, pet: Pet):
 def update_video_status(db: Session, video_id: UUID, status: str):
     video = db.query(Converter).filter_by(id=video_id).first()
     if video:
-        video.status = status
+        setattr(video, "status", status)  # Use setattr para atribuir o valor
         db.commit()
         db.refresh(video)
     return video

@@ -6,14 +6,25 @@ from dataclasses import dataclass
 from typing import List, Optional, Union
 from pathlib import Path
 
+from abc import ABC, abstractmethod
+
+
+class Processor(ABC):
+    input_directory: Union[str, Path]
+    output_directory: Union[str, Path]
+
+    @abstractmethod
+    def process_images(self) -> None:
+        pass
+
 
 @dataclass
-class AliceVisionProcessor:
+class AliceVisionProcessor(Processor):
     input_directory: Union[str, Path]
     output_directory: Union[str, Path]
     alicevision_bin_path: Union[str, Path] = os.environ.get(
         "ALICEVISION_BIN_PATH",
-        "/home/pedro/dev/tcc/tcc/src/Meshroom-2023.3.0/aliceVision/bin",
+        "/home/pedro/dev/tcc/tcc/src/Framework/aliceVision/bin",
     )
     force_cpu: bool = True
     verbose: bool = True
@@ -176,8 +187,8 @@ colorspaces:
             str(self.alicevision_lib_path),
             "/usr/lib",
             "/usr/local/lib",
-            "/home/pedro/dev/tcc/src/Meshroom-2023.3.0/lib",
-            "/home/pedro/dev/tcc/src/Meshroom-2023.3.0/aliceVision/lib",
+            "/home/pedro/dev/tcc/src/Framework/lib",
+            "/home/pedro/dev/tcc/src/Framework/aliceVision/lib",
         ]
         current_env["LD_LIBRARY_PATH"] = (
             ":".join([path for path in lib_paths if os.path.exists(path)])
@@ -427,6 +438,7 @@ colorspaces:
             else:
                 # Se o arquivo existe apenas no cache_dir, copiar para o diretório sfm
                 import shutil
+
                 shutil.copy2(str(input_sfm), str(output_sfm))
                 print(f"Arquivo sfm.json copiado de {input_sfm} para {output_sfm}")
         # Debug: mostrar conteúdo do arquivo gerado
